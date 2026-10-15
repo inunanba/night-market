@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "dev": "deno run --watch --unstable-kv -A main.ts",
+    "start": "deno run --unstable-kv -A main.ts",
+    "test": "deno test --unstable-kv -A tests/"
+  },
+  "unstable": ["kv"],
+  "deploy": { "entrypoint": "main.ts" }
+}
