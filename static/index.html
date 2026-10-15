@@ -60,6 +60,11 @@ h2{margin:.1em 0 .4em;font-size:20px}
 .pl .purse{font-weight:800;color:var(--gold);white-space:nowrap}
 .pl .mini{font-size:20px;letter-spacing:2px}
 .pl .mini span{display:inline-block;border-bottom:3px solid}
+.pl .prog{font-size:12px;color:var(--dim);margin-top:2px}
+.pl .prog b{color:var(--ink)}
+.pl .prog span{margin-right:7px;white-space:nowrap}
+.pl .live{font-size:12px;color:var(--dim);text-align:right}
+button.on{background:var(--jade);color:#06231a;box-shadow:none}
 .env{position:absolute;right:-6px;top:-8px;font-size:22px;transition:transform .3s}
 .reveal{position:fixed;inset:0;background:#07051299;backdrop-filter:blur(3px);display:grid;place-items:center;z-index:9}
 .reveal .box{background:#1a1536;border:2px solid var(--line);border-radius:22px;padding:22px;min-width:min(520px,92vw);text-align:center;box-shadow:0 20px 60px #000a}
@@ -184,7 +189,8 @@ footer{color:var(--dim);font-size:13px;text-align:center;margin-top:24px}
   <div style="font-size:22px;font-weight:800" id="rvstall"></div>
   <div class="flips" id="rvflips"></div>
   <div class="verdict" id="rvverdict"></div>
-  <button class="ghost" id="rvok" style="margin-top:10px">Continue</button>
+  <div class="row" style="justify-content:center;margin-top:10px"><button class="ghost" id="rvhold" title="Keep each reveal open until you press Next">⏸ Hold</button><button class="ghost" id="rvok">Next ▶</button><button class="ghost hidden" id="rvstop">✕ End replay</button></div>
+  <div class="muted" id="rvtip" style="font-size:12px;margin-top:6px"></div>
 </div></div>
 <div class="toast hidden" id="toast"></div>
 
@@ -193,7 +199,16 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const COL = { red: "var(--red)", gold: "var(--gold)", jade: "var(--jade)", indigo: "var(--indigo)" };
-let S = null, code = null, token = null, myBid = 0, shownRounds = 0, pollGen = 0, replaying = false;
+let S = null, code = null, token = null, myBid = 0, shownRounds = 0, pollGen = 0, replaying = false, hold = false, stopReplay = false;
+const COLS = ["red", "gold", "jade", "indigo"];
+// same maths as the server's scorePlayers: stall points + 4 per colour with 3+ stalls + 5 for all 4 colours + 1 per 3 coins
+function liveScore(stalls, coins) {
+  const counts = Object.fromEntries(COLS.map((c) => [c, stalls.filter((x) => x.colour === c).length]));
+  const pts = stalls.reduce((a, x) => a + (x.points ?? 0), 0);
+  const sets = COLS.filter((c) => counts[c] >= 3).length * 4;
+  const rainbow = COLS.every((c) => counts[c] > 0) ? 5 : 0;
+  return { counts, pts, sets, rainbow, coinPts: Math.floor(coins / 3), total: pts + sets + rainbow + Math.floor(coins / 3) };
+}
 
 // decorative lantern string
 (() => {
@@ -293,6 +308,9 @@ function hint(s) {
   const bits = [];
   if (same === 2) bits.push(`🎯 this completes your ${s.stall.colour} set (+4)`);
   if (!cols.has(s.stall.colour) && cols.size === 3) bits.push("🌈 last colour for your rainbow (+5)");
+  const now = liveScore(me.stalls, 0), withIt = liveScore([...me.stalls, s.stall], 0);
+  const bonus = withIt.sets + withIt.rainbow - now.sets - now.rainbow;
+  bits.unshift(s.stall.mystery ? `this stall is worth ? ${bonus ? `+ ${bonus} bonus ` : ""}to you` : `this stall is worth <b>+${withIt.pts - now.pts + bonus}</b> to you${bonus ? ` (${s.stall.points} + ${bonus} bonus)` : ""}`);
   const rich = s.players.filter((p) => p.id !== me.id).sort((a, b) => b.coins - a.coins)[0];
   if (rich) bits.push(`richest rival: ${esc(rich.name)} with ${rich.coins}🪙`);
   $("hint").innerHTML = bits.join(" · ");
@@ -330,9 +348,15 @@ function renderPlayers(el, s) {
   el.innerHTML = s.players.map((p) => `<div class="pl ${s.you?.id === p.id ? "me" : ""}">
     <div class="av">${avatar(p)}</div>
     <div><div><b>${esc(p.name.replace(/^🤖 /, ""))}</b>${p.host ? ' <span class="muted">(host)</span>' : ""}${s.you?.id === p.id ? ' <span class="muted">(you)</span>' : ""}</div>
-      <div class="mini">${p.stalls.map((x) => `<span title="${esc(x.name)} (${x.points})" style="border-color:${COL[x.colour]}">${x.emoji}</span>`).join("") || '<span class="muted" style="border:0;font-size:13px;letter-spacing:0">no stalls yet</span>'}</div></div>
-    <div class="purse">${p.coins}🪙</div>
+      <div class="mini">${p.stalls.map((x) => `<span title="${esc(x.name)} (${x.points})" style="border-color:${COL[x.colour]}">${x.emoji}</span>`).join("") || '<span class="muted" style="border:0;font-size:13px;letter-spacing:0">no stalls yet</span>'}</div>${progress(p)}</div>
+    <div class="purse">${p.coins}🪙${s.status === "playing" ? `<div class="live" title="score if the night ended now">${liveScore(p.stalls, p.coins).total} pts now</div>` : ""}</div>
     ${s.status === "playing" ? `<div class="env">${p.hasBid ? "✉️" : "⏳"}</div>` : ""}</div>`).join("");
+}
+function progress(p) {
+  if (!p.stalls.length) return "";
+  const sc = liveScore(p.stalls, p.coins);
+  const have = COLS.filter((c) => sc.counts[c] > 0);
+  return `<div class="prog">${have.map((c) => `<span class="t-${c}">${c} <b>${Math.min(sc.counts[c], 3)}/3</b>${sc.counts[c] >= 3 ? " ✓+4" : ""}</span>`).join("")}<span>🌈 <b>${have.length}/4</b>${have.length === 4 ? " ✓+5" : ""}</span></div>`;
 }
 const nameOf = (s, id) => esc((s.players.find((p) => p.id === id)?.name || id).replace(/^🤖 /, ""));
 function line(s, h) {
@@ -364,8 +388,10 @@ async function revealRound(s, h) {
   const ids = Object.keys(h.bids);
   $("rvflips").innerHTML = ids.map((id) => `<div class="flip" id="fl-${id}"><div class="in"><div class="f">✉️</div><div class="b"><div class="v">${h.bids[id]}</div><div class="n">${nameOf(s, id)}</div></div></div></div>`).join("");
   $("rvverdict").textContent = "";
-  let done = false; const skip = new Promise((r) => $("rvok").onclick = () => { done = true; r(); });
+  let done = false; const skip = new Promise((r) => { $("rvok").onclick = () => { done = true; r(); }; $("rvstop").onclick = () => { stopReplay = true; done = true; r(); }; });
   const wait = (ms) => Promise.race([sleep(ms), skip]);
+  $("rvstop").classList.toggle("hidden", !replaying);
+  holdLabel();
   await wait(450);
   for (const id of ids) { if (done) break; $("fl-" + id).classList.add("go"); await wait(260); }
   for (const id of ids) $("fl-" + id).classList.add("go");
@@ -379,9 +405,20 @@ async function revealRound(s, h) {
   if (h.winner && h.winner === myId) v = h.burned.length ? `🎉 …and it falls to you for just ${h.price}🪙!` : `🎉 You win it for ${h.price}🪙`;
   if (h.stall.mystery) v += ` · ${h.stall.emoji} was worth ${h.stall.points}${h.stall.points < 0 ? " 😬" : h.stall.points >= 5 ? " ✨" : ""}`;
   $("rvverdict").innerHTML = `<span class="pop" style="display:inline-block">${v}</span>`;
-  await wait(replaying ? 1500 : 2200);
+  // closes by itself unless Hold is on; then it waits for Next
+  const t0 = Date.now(), ms = replaying ? 1800 : 2600;
+  while (!done && (hold || Date.now() - t0 < ms)) await Promise.race([sleep(100), skip]);
   box.classList.add("hidden");
 }
+
+function holdLabel() {
+  $("rvhold").textContent = hold ? "▶ Auto" : "⏸ Hold";
+  $("rvhold").classList.toggle("on", hold);
+  $("rvtip").textContent = hold ? "Held: press Next ▶ when you're ready." : replaying ? "Hold pauses the replay on each round." : "";
+}
+$("rvhold").onclick = () => { hold = !hold; localStorage.setItem("nm:hold", hold ? "1" : ""); holdLabel(); };
+hold = !!localStorage.getItem("nm:hold");
+document.addEventListener("keydown", (e) => { if (!$("reveal").classList.contains("hidden") && (e.key === " " || e.key === "Enter")) { e.preventDefault(); e.stopImmediatePropagation(); $("rvok").click(); } }, true);
 
 function renderEnd(s) {
   show("end");
@@ -396,8 +433,8 @@ function renderEnd(s) {
 $("again").onclick = () => { pollGen++; location.hash = ""; S = null; show("home"); };
 $("replaybtn").onclick = async () => {
   const s = S; replaying = true; $("replaybtn").disabled = true;
-  const fake = { ...s, history: [] };
-  try { for (const h of s.history) { await revealRound(s, h); } } finally { replaying = false; $("replaybtn").disabled = false; }
+  stopReplay = false;
+  try { for (const h of s.history) { if (stopReplay) break; await revealRound(s, h); } } finally { replaying = false; stopReplay = false; $("replaybtn").disabled = false; $("reveal").classList.add("hidden"); }
 };
 
 // deep links: /#CODE resumes as a player if we hold a token, else spectates/replays
