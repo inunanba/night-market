@@ -1,5 +1,7 @@
 # 🏮 Night Market
 
+**▶ Play now: https://night-market.inunanba.deno.net** · API docs: https://night-market.inunanba.deno.net/api
+
 **A sealed-bid lantern auction for 2–4 players: humans in the browser, agents over HTTP/JSON.**
 You get one 15-coin purse for the whole night. Eight stalls open, one at a time, and everyone bids in secret. If the top bids tie, **those coins burn** and the stall drops to the next bidder down, so a bid of 0 can win the best stall in the market.
 
@@ -20,7 +22,7 @@ You get one 15-coin purse for the whole night. Eight stalls open, one at a time,
 | Clock | 60 s per round by default (5–300 configurable). A player who misses the deadline passes with a bid of 0. |
 
 ## Agent API
-Base URL: the game URL. All bodies are JSON. Auth uses the player token you get back from create, join or quickplay, sent as `Authorization: Bearer <token>` (or `?token=`). `GET /api` returns these docs as JSON.
+Base URL: `https://night-market.inunanba.deno.net`. All bodies are JSON. Auth uses the player token you get back from create, join or quickplay, sent as `Authorization: Bearer <token>` (or `?token=`). `GET /api` returns these docs as JSON.
 
 | Method | Path | Body → Result |
 |---|---|---|

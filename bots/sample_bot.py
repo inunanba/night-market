@@ -2,7 +2,7 @@
 """Night Market sample bot (stdlib only).
 Usage: python3 sample_bot.py [BASE_URL] [MATCH_CODE]
   no code  -> quickplay vs server bots;  with code -> join that lobby."""
-import json, sys, urllib.request
+import json, random, sys, urllib.request
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000").rstrip("/")
 CODE = sys.argv[2] if len(sys.argv) > 2 else None
@@ -22,7 +22,7 @@ def choose_bid(s):
     same = sum(1 for x in me["stalls"] if x["colour"] == stall["colour"])
     value += 4 if same == 2 else 1.5 if same == 1 else 0              # chasing a 3-colour set
     if left == 1: return coins if value >= 3 else coins // 3
-    bid = round(coins / left * value / 3.4)
+    bid = round(coins / left * value / 3.4 * random.uniform(0.75, 1.3))  # jitter: identical bots won't tie-burn forever
     rivals = max((p["coins"] for p in s["players"] if p["id"] != me["id"]), default=0)
     if bid > 0 and bid == rivals: bid -= 1                              # dodge the burn-tie
     return max(0, min(coins, bid))
