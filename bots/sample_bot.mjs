@@ -18,7 +18,7 @@ while (s.status !== "done") {
   if (s.you.mustBid) {
     const left = s.rounds - s.round + 1, coins = s.you.coins;
     const value = s.stall.points ?? 2.75;
-    const bid = left === 1 ? coins : Math.min(coins, Math.round((coins / left) * (value / 3.4) * (0.75 + Math.random() * 0.55)));
+    const bid = left === 1 ? coins : Math.max(0, Math.min(coins, Math.round((coins / left) * (value / 3.4) * (0.7 + Math.random() * 0.6)) + [-1, 0, 0, 1][Math.floor(Math.random() * 4)]));
     console.log(`round ${s.round}: ${s.stall.name} -> ${bid}`);
     s = await call("POST", `/api/matches/${j.code}/bid`, { bid }, j.token);
   } else s = await call("GET", `/api/matches/${j.code}?since=${s.version}`, null, j.token);

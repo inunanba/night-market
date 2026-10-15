@@ -22,7 +22,7 @@ def choose_bid(s):
     same = sum(1 for x in me["stalls"] if x["colour"] == stall["colour"])
     value += 4 if same == 2 else 1.5 if same == 1 else 0              # chasing a 3-colour set
     if left == 1: return coins if value >= 3 else coins // 3
-    bid = round(coins / left * value / 3.4 * random.uniform(0.75, 1.3))  # jitter: identical bots won't tie-burn forever
+    bid = round(coins / left * value / 3.4 * random.uniform(0.7, 1.3)) + random.choice((-1, 0, 0, 1))  # jitter: identical bots won't tie-burn forever
     rivals = max((p["coins"] for p in s["players"] if p["id"] != me["id"]), default=0)
     if bid > 0 and bid == rivals: bid -= 1                              # dodge the burn-tie
     return max(0, min(coins, bid))
