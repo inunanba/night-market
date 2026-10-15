@@ -144,6 +144,7 @@ export async function handler(req: Request, info: Deno.ServeHandlerInfo): Promis
       const { m, out } = await mutate(code, (m) => {
         const me = findByToken(m, token);
         if (me.id !== m.hostId) throw new ApiError(403, "not_host", "Only the host can start");
+        if (lobbyExpired(m, Date.now())) throw new ApiError(410, "expired", "Lobby expired; create a new one");
         startMatch(m, Date.now());
         return me;
       });

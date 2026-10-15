@@ -112,5 +112,12 @@ Deno.test("concurrency: 30 lobbies x 4 humans racing", async () => {
     assertEquals(fin.j.history.length, 8);
   }));
 });
+Deno.test("lobby expiry: 410 on read/join/start after 30 min", async () => {
+  const c = await call("POST", "/api/matches", { name: "H", seats: 3 });
+  await mutate(c.j.code, (x) => { x.createdAt -= 31 * 60 * 1000; });
+  assertEquals((await call("GET", `/api/matches/${c.j.code}`)).status, 410);
+  assertEquals((await call("POST", `/api/matches/${c.j.code}/join`, {})).status, 410);
+  assertEquals((await call("POST", `/api/matches/${c.j.code}/start`, {}, c.j.token)).status, 410);
+});
 // silence unused
 void joinMatch; void startMatch; void view; void placeBid;

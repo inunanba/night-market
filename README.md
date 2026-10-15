@@ -8,8 +8,7 @@ You get one 15-coin purse for the whole night. Eight stalls open, one at a time,
 - No install, no login. Open the URL and press **Play now vs bots**, or open a lobby and share its 4-letter code.
 - Bots fill any empty seat. There are four personalities: Tanuki Tom, Vixen Vee, Miser Moth and Night Owl.
 - Every bid is flipped at once in a reveal animation, and finished matches get a full replay and a shareable link.
-- The agent API is a handful of JSON routes (listed below), uses long-polling (no tight loops) and returns plain JSON errors. Sample bots are in Python (stdlib only) and JS.
-- While you play, every purse shows a live score and colour-set progress, and the bid hint tells you what the current stall is worth to you. Reveals can be held open with **⏸ Hold** and stepped with **Next ▶**.
+- The agent API has 8 endpoints, but a bot only needs 3 (quickplay, bid, state). It uses long-polling (no tight loops) and returns plain JSON errors. Sample bots are in Python (stdlib only) and JS.
 
 ## Rules
 | | |
@@ -40,28 +39,29 @@ The fields you need from `state`: `status` (`lobby|playing|done`), `version`, `r
 
 Errors look like `{"error":"bad_bid","message":"Bid must be an integer from 0 to 7"}`, with HTTP 400, 401, 404, 409, 410 or 429.
 
-### The whole game loop
-Copy-paste runnable (needs `curl` and `jq`). It plays a full quickplay match by always bidding 2, or less when your purse is low:
+### Copy-paste: a complete game from bash (needs `curl` + `jq`)
 ```bash
 URL=https://night-market.inunanba.deno.net
 J=$(curl -s -XPOST $URL/api/quickplay -H 'content-type: application/json' -d '{"name":"curl-bot"}')
 CODE=$(jq -r .code <<<"$J"); TOKEN=$(jq -r .token <<<"$J"); S=$(jq .state <<<"$J")
+echo "match $CODE  (watch it: $URL/#$CODE)"
 while [ "$(jq -r .status <<<"$S")" != done ]; do
   if [ "$(jq -r .you.mustBid <<<"$S")" = true ]; then
-    BID=$(jq '[2, .you.coins] | min' <<<"$S")
-    S=$(curl -s -XPOST $URL/api/matches/$CODE/bid -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d "{\"bid\":$BID}")
-  else   # long-poll: returns as soon as anything changes, or after 25 s
+    BID=$(jq '[.you.coins, ((.stall.points // 3) + 1)] | min' <<<"$S")   # naive: points+1
+    echo "round $(jq .round <<<"$S"): $(jq -r .stall.name <<<"$S") -> bid $BID"
+    S=$(curl -s -XPOST $URL/api/matches/$CODE/bid -H "authorization: Bearer $TOKEN" -d "{\"bid\":$BID}")
+  else   # long-poll: returns as soon as something changes (max 25 s)
     S=$(curl -s "$URL/api/matches/$CODE?since=$(jq .version <<<"$S")" -H "authorization: Bearer $TOKEN")
   fi
 done
 jq -r '.final[] | "#\(.rank) \(.name): \(.total) pts"' <<<"$S"
 ```
-The same loop in pseudocode:
+Pseudocode for any language:
 ```
-state = quickplay()
+state = POST /api/quickplay
 while state.status != "done":
-    if state.you.mustBid: state = POST bid
-    else:                 state = GET state?since=state.version
+    if state.you.mustBid: state = POST /api/matches/{code}/bid {bid}
+    else:                 state = GET  /api/matches/{code}?since={state.version}
 ```
 Sample bots: [`bots/sample_bot.py`](bots/sample_bot.py) (`python3 bots/sample_bot.py https://<url> [CODE]`) and [`bots/sample_bot.mjs`](bots/sample_bot.mjs). Both are also served at `/bots/…`.
 

@@ -120,6 +120,7 @@ function addBot(m: Match) {
 
 export function joinMatch(m: Match, name: string): Player {
   if (m.status !== "lobby") throw new ApiError(409, "already_started", "Match already started");
+  if (lobbyExpired(m, Date.now())) throw new ApiError(410, "expired", "Lobby expired; create a new one");
   if (m.players.length >= m.seats) throw new ApiError(409, "full", "Match is full");
   const p = makePlayer(name, false, m.players.length);
   m.players.push(p);

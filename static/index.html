@@ -60,11 +60,9 @@ h2{margin:.1em 0 .4em;font-size:20px}
 .pl .purse{font-weight:800;color:var(--gold);white-space:nowrap}
 .pl .mini{font-size:20px;letter-spacing:2px}
 .pl .mini span{display:inline-block;border-bottom:3px solid}
-.pl .prog{font-size:12px;color:var(--dim);margin-top:2px}
-.pl .prog b{color:var(--ink)}
-.pl .prog span{margin-right:7px;white-space:nowrap}
-.pl .live{font-size:12px;color:var(--dim);text-align:right}
-button.on{background:var(--jade);color:#06231a;box-shadow:none}
+.pl .score{font-size:12px;color:var(--ink);font-weight:700;text-align:right}
+.progrow{grid-column:2/4;display:flex;gap:10px;align-items:center;font-size:12px}
+.prog{display:inline-flex;gap:2px}.prog i{width:9px;height:9px;border-radius:50%;border:1.5px solid;display:inline-block}
 .env{position:absolute;right:-6px;top:-8px;font-size:22px;transition:transform .3s}
 .reveal{position:fixed;inset:0;background:#07051299;backdrop-filter:blur(3px);display:grid;place-items:center;z-index:9}
 .reveal .box{background:#1a1536;border:2px solid var(--line);border-radius:22px;padding:22px;min-width:min(520px,92vw);text-align:center;box-shadow:0 20px 60px #000a}
@@ -189,8 +187,7 @@ footer{color:var(--dim);font-size:13px;text-align:center;margin-top:24px}
   <div style="font-size:22px;font-weight:800" id="rvstall"></div>
   <div class="flips" id="rvflips"></div>
   <div class="verdict" id="rvverdict"></div>
-  <div class="row" style="justify-content:center;margin-top:10px"><button class="ghost" id="rvhold" title="Keep each reveal open until you press Next">⏸ Hold</button><button class="ghost" id="rvok">Next ▶</button><button class="ghost hidden" id="rvstop">✕ End replay</button></div>
-  <div class="muted" id="rvtip" style="font-size:12px;margin-top:6px"></div>
+  <div class="row" style="justify-content:center;margin-top:10px"><button class="ghost hidden" id="rvprev">◀ Prev</button><button id="rvok">Continue ▶</button><button class="ghost hidden" id="rvclose">Close replay</button></div><div class="muted" id="rvhint" style="font-size:12px;margin-top:6px">Enter / Space = continue</div>
 </div></div>
 <div class="toast hidden" id="toast"></div>
 
@@ -199,16 +196,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const COL = { red: "var(--red)", gold: "var(--gold)", jade: "var(--jade)", indigo: "var(--indigo)" };
-let S = null, code = null, token = null, myBid = 0, shownRounds = 0, pollGen = 0, replaying = false, hold = false, stopReplay = false;
-const COLS = ["red", "gold", "jade", "indigo"];
-// same maths as the server's scorePlayers: stall points + 4 per colour with 3+ stalls + 5 for all 4 colours + 1 per 3 coins
-function liveScore(stalls, coins) {
-  const counts = Object.fromEntries(COLS.map((c) => [c, stalls.filter((x) => x.colour === c).length]));
-  const pts = stalls.reduce((a, x) => a + (x.points ?? 0), 0);
-  const sets = COLS.filter((c) => counts[c] >= 3).length * 4;
-  const rainbow = COLS.every((c) => counts[c] > 0) ? 5 : 0;
-  return { counts, pts, sets, rainbow, coinPts: Math.floor(coins / 3), total: pts + sets + rainbow + Math.floor(coins / 3) };
-}
+let S = null, code = null, token = null, myBid = 0, shownRounds = 0, pollGen = 0, replaying = false;
 
 // decorative lantern string
 (() => {
@@ -252,10 +240,10 @@ $("joincode").onkeydown = (e) => { if (e.key === "Enter") $("join").click(); };
 
 async function watch(c) { token = null; try { const s = await api("GET", `/api/matches/${c}`); enter(c, null, s); } catch (e) { toast(e.message); } }
 
-function enter(c, t, s) {
+async function enter(c, t, s) {
   code = c; token = t; saveTok(); location.hash = c;
   shownRounds = s.history.length; S = null;
-  render(s); poll();
+  await render(s); poll(); // poll only after S is set, or the loop exits at once
 }
 
 async function poll() {
@@ -308,9 +296,6 @@ function hint(s) {
   const bits = [];
   if (same === 2) bits.push(`🎯 this completes your ${s.stall.colour} set (+4)`);
   if (!cols.has(s.stall.colour) && cols.size === 3) bits.push("🌈 last colour for your rainbow (+5)");
-  const now = liveScore(me.stalls, 0), withIt = liveScore([...me.stalls, s.stall], 0);
-  const bonus = withIt.sets + withIt.rainbow - now.sets - now.rainbow;
-  bits.unshift(s.stall.mystery ? `this stall is worth ? ${bonus ? `+ ${bonus} bonus ` : ""}to you` : `this stall is worth <b>+${withIt.pts - now.pts + bonus}</b> to you${bonus ? ` (${s.stall.points} + ${bonus} bonus)` : ""}`);
   const rich = s.players.filter((p) => p.id !== me.id).sort((a, b) => b.coins - a.coins)[0];
   if (rich) bits.push(`richest rival: ${esc(rich.name)} with ${rich.coins}🪙`);
   $("hint").innerHTML = bits.join(" · ");
@@ -344,19 +329,25 @@ function tickTimer() {
 setInterval(() => { if (S && !S._t) S._t = Date.now(); tickTimer(); }, 1000);
 
 function avatar(p) { return p.isBot ? "🤖" : "🧑"; }
+function liveScore(p) {
+  const counts = { red: 0, gold: 0, jade: 0, indigo: 0 };
+  let pts = 0;
+  for (const x of p.stalls) { counts[x.colour]++; pts += x.points; }
+  const sets = Object.values(counts).filter((n) => n >= 3).length * 4;
+  const rainbow = Object.values(counts).every((n) => n > 0) ? 5 : 0;
+  return { total: pts + sets + rainbow + Math.floor(p.coins / 3), counts };
+}
+function progress(counts) {
+  return Object.entries(counts).map(([c, n]) => `<span class="prog" title="${c}: ${n}/3 for set${n ? "" : " · needed for rainbow"}">${[0, 1, 2].map((i) => `<i style="background:${i < n ? COL[c] : "transparent"};border-color:${COL[c]}"></i>`).join("")}</span>`).join("");
+}
 function renderPlayers(el, s) {
   el.innerHTML = s.players.map((p) => `<div class="pl ${s.you?.id === p.id ? "me" : ""}">
     <div class="av">${avatar(p)}</div>
     <div><div><b>${esc(p.name.replace(/^🤖 /, ""))}</b>${p.host ? ' <span class="muted">(host)</span>' : ""}${s.you?.id === p.id ? ' <span class="muted">(you)</span>' : ""}</div>
-      <div class="mini">${p.stalls.map((x) => `<span title="${esc(x.name)} (${x.points})" style="border-color:${COL[x.colour]}">${x.emoji}</span>`).join("") || '<span class="muted" style="border:0;font-size:13px;letter-spacing:0">no stalls yet</span>'}</div>${progress(p)}</div>
-    <div class="purse">${p.coins}🪙${s.status === "playing" ? `<div class="live" title="score if the night ended now">${liveScore(p.stalls, p.coins).total} pts now</div>` : ""}</div>
+      <div class="mini">${p.stalls.map((x) => `<span title="${esc(x.name)} (${x.points})" style="border-color:${COL[x.colour]}">${x.emoji}</span>`).join("") || '<span class="muted" style="border:0;font-size:13px;letter-spacing:0">no stalls yet</span>'}</div></div>
+    <div class="purse">${p.coins}🪙<div class="score" title="score if the night ended now">${liveScore(p).total} pts</div></div>
+    <div class="progrow">${progress(liveScore(p).counts)}${Object.values(liveScore(p).counts).every((n) => n > 0) ? ' <span title="rainbow bonus +5">🌈</span>' : ""}</div>
     ${s.status === "playing" ? `<div class="env">${p.hasBid ? "✉️" : "⏳"}</div>` : ""}</div>`).join("");
-}
-function progress(p) {
-  if (!p.stalls.length) return "";
-  const sc = liveScore(p.stalls, p.coins);
-  const have = COLS.filter((c) => sc.counts[c] > 0);
-  return `<div class="prog">${have.map((c) => `<span class="t-${c}">${c} <b>${Math.min(sc.counts[c], 3)}/3</b>${sc.counts[c] >= 3 ? " ✓+4" : ""}</span>`).join("")}<span>🌈 <b>${have.length}/4</b>${have.length === 4 ? " ✓+5" : ""}</span></div>`;
 }
 const nameOf = (s, id) => esc((s.players.find((p) => p.id === id)?.name || id).replace(/^🤖 /, ""));
 function line(s, h) {
@@ -380,24 +371,36 @@ $("startbtn").onclick = async () => { try { await render(await api("POST", `/api
 $("copylink").onclick = () => { navigator.clipboard?.writeText(location.origin + "/#" + code); toast("Invite link copied"); };
 $("copyreplay").onclick = () => { navigator.clipboard?.writeText(location.origin + "/#" + code); toast("Replay link copied"); };
 
-async function revealRound(s, h) {
-  if (S === null && !replaying) return; // initial load: don't replay history at the user
+// Shows one round's reveal and waits for the player. Resolves "next" | "prev" | "close".
+async function revealRound(s, h, opts = {}) {
+  if (S === null && !opts.replay) return "next"; // initial load: don't replay history at the user
   const box = $("reveal"); box.classList.remove("hidden");
-  $("rvround").textContent = `Round ${h.round} of 8 — bids revealed`;
+  $("rvprev").classList.toggle("hidden", !opts.replay);
+  $("rvclose").classList.toggle("hidden", !opts.replay);
+  $("rvprev").disabled = !opts.replay || h.round === 1;
+  $("rvok").textContent = opts.replay ? (h.round === s.history.length ? "Finish ✓" : "Next ▶") : "Continue ▶";
+  $("rvround").textContent = `${opts.replay ? "Replay · " : ""}Round ${h.round} of 8 — bids revealed`;
   $("rvstall").innerHTML = `${h.stall.emoji} ${esc(h.stall.name)} <span class="tag c-${h.stall.colour}">${h.stall.colour}</span>`;
   const ids = Object.keys(h.bids);
   $("rvflips").innerHTML = ids.map((id) => `<div class="flip" id="fl-${id}"><div class="in"><div class="f">✉️</div><div class="b"><div class="v">${h.bids[id]}</div><div class="n">${nameOf(s, id)}</div></div></div></div>`).join("");
   $("rvverdict").textContent = "";
-  let done = false; const skip = new Promise((r) => { $("rvok").onclick = () => { done = true; r(); }; $("rvstop").onclick = () => { stopReplay = true; done = true; r(); }; });
+  // phase 1: animation (a click/key skips it); phase 2: wait for an explicit choice
+  let skipped = false, choose;
+  const choice = new Promise((r) => choose = r);
+  const press = (what) => { if (!animDone) { skipped = true; skipNow(); } else choose(what); };
+  let animDone = false, skipNow = () => {};
+  const skip = new Promise((r) => skipNow = r);
+  $("rvok").onclick = () => press("next");
+  $("rvprev").onclick = () => { animDone = true; choose("prev"); };
+  $("rvclose").onclick = () => { animDone = true; choose("close"); };
+  revealKey = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); press("next"); } else if (opts.replay && e.key === "ArrowLeft") $("rvprev").click(); else if (e.key === "Escape" && opts.replay) $("rvclose").click(); };
   const wait = (ms) => Promise.race([sleep(ms), skip]);
-  $("rvstop").classList.toggle("hidden", !replaying);
-  holdLabel();
-  await wait(450);
-  for (const id of ids) { if (done) break; $("fl-" + id).classList.add("go"); await wait(260); }
+  await wait(400);
+  for (const id of ids) { if (skipped) break; $("fl-" + id).classList.add("go"); await wait(240); }
   for (const id of ids) $("fl-" + id).classList.add("go");
-  await wait(500);
+  await wait(450);
   for (const id of h.burned) { const f = $("fl-" + id); f.classList.add("burn", "burnfx"); f.querySelector(".v").textContent = "🔥" + h.bids[id]; }
-  if (h.burned.length && !done) { $("rvverdict").innerHTML = `<span class="t-red">🔥 Tie at ${h.bids[h.burned[0]]}! Those coins burn…</span>`; await wait(1100); }
+  if (h.burned.length && !skipped) { $("rvverdict").innerHTML = `<span class="t-red">🔥 Tie at ${h.bids[h.burned[0]]}! Those coins burn…</span>`; await wait(1000); }
   if (h.winner) $("fl-" + h.winner).classList.add("win");
   const myId = S?.you?.id;
   let v = h.winner ? `${nameOf(s, h.winner)} wins it for ${h.price}🪙` : "Nobody gets it — the stall stays dark";
@@ -405,20 +408,14 @@ async function revealRound(s, h) {
   if (h.winner && h.winner === myId) v = h.burned.length ? `🎉 …and it falls to you for just ${h.price}🪙!` : `🎉 You win it for ${h.price}🪙`;
   if (h.stall.mystery) v += ` · ${h.stall.emoji} was worth ${h.stall.points}${h.stall.points < 0 ? " 😬" : h.stall.points >= 5 ? " ✨" : ""}`;
   $("rvverdict").innerHTML = `<span class="pop" style="display:inline-block">${v}</span>`;
-  // closes by itself unless Hold is on; then it waits for Next
-  const t0 = Date.now(), ms = replaying ? 1800 : 2600;
-  while (!done && (hold || Date.now() - t0 < ms)) await Promise.race([sleep(100), skip]);
+  animDone = true;
+  const c = await choice;
+  revealKey = null;
   box.classList.add("hidden");
+  return c;
 }
-
-function holdLabel() {
-  $("rvhold").textContent = hold ? "▶ Auto" : "⏸ Hold";
-  $("rvhold").classList.toggle("on", hold);
-  $("rvtip").textContent = hold ? "Held: press Next ▶ when you're ready." : replaying ? "Hold pauses the replay on each round." : "";
-}
-$("rvhold").onclick = () => { hold = !hold; localStorage.setItem("nm:hold", hold ? "1" : ""); holdLabel(); };
-hold = !!localStorage.getItem("nm:hold");
-document.addEventListener("keydown", (e) => { if (!$("reveal").classList.contains("hidden") && (e.key === " " || e.key === "Enter")) { e.preventDefault(); e.stopImmediatePropagation(); $("rvok").click(); } }, true);
+let revealKey = null;
+document.addEventListener("keydown", (e) => { if (revealKey && !$("reveal").classList.contains("hidden")) { e.stopImmediatePropagation(); revealKey(e); } }, true);
 
 function renderEnd(s) {
   show("end");
@@ -433,8 +430,14 @@ function renderEnd(s) {
 $("again").onclick = () => { pollGen++; location.hash = ""; S = null; show("home"); };
 $("replaybtn").onclick = async () => {
   const s = S; replaying = true; $("replaybtn").disabled = true;
-  stopReplay = false;
-  try { for (const h of s.history) { if (stopReplay) break; await revealRound(s, h); } } finally { replaying = false; stopReplay = false; $("replaybtn").disabled = false; $("reveal").classList.add("hidden"); }
+  try {
+    let i = 0;
+    while (i >= 0 && i < s.history.length) {
+      const c = await revealRound(s, s.history[i], { replay: true });
+      if (c === "close") break;
+      i = c === "prev" ? Math.max(0, i - 1) : i + 1;
+    }
+  } finally { replaying = false; $("replaybtn").disabled = false; }
 };
 
 // deep links: /#CODE resumes as a player if we hold a token, else spectates/replays
